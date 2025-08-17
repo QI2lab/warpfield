@@ -96,6 +96,17 @@ extern "C" __global__ void warp_volume_kernel(const float * arr, const int * arr
     "warp_volume_kernel",
 )
 
+# Cache kernels per device id:
+_warp_kernel_cache = {}
+
+def _get_warp_volume_kernel():
+    dev_id = int(cp.cuda.Device().id)  # current device
+    kern = _warp_kernel_cache.get(dev_id)
+    if kern is None:
+        # Compile for THIS device now that device is selected
+        kern = cp.RawKernel(_warp_volume_kernel, "warp_volume_kernel")  # use your actual kernel func name
+        _warp_kernel_cache[dev_id] = kern
+    return kern
 
 def warp_volume(vol, disp_field, disp_scale, disp_offset, out=None, tpb=[8, 8, 8]):
     """Warp a 3D volume using a displacement field (calling a CUDA kernel).
@@ -125,7 +136,10 @@ def warp_volume(vol, disp_field, disp_scale, disp_offset, out=None, tpb=[8, 8, 8
         out = cp.zeros(vol.shape, dtype=vol.dtype)
     assert out.dtype == cp.dtype("float32")
     bpg = np.ceil(np.array(out.shape) / tpb).astype("int").tolist()  # blocks per grid
-    _warp_volume_kernel(
+
+    kern = _get_warp_volume_kernel()
+    
+    kern(
         tuple(bpg),
         tuple(tpb),
         (
